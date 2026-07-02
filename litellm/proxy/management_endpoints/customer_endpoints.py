@@ -53,6 +53,20 @@ def _to_customer_response(record: BaseModel) -> CustomerResponse:
     return CustomerResponse.model_validate(record.model_dump())
 
 
+async def _invalidate_end_user_cache(user_id: str) -> None:
+    from litellm.proxy.proxy_server import user_api_key_cache
+
+    cache_key = f"end_user_id:{user_id}"
+    try:
+        await user_api_key_cache.async_delete_cache(key=cache_key)
+    except Exception:
+        verbose_proxy_logger.debug(
+            "Unable to delete stale end-user cache entry %s",
+            cache_key,
+            exc_info=True,
+        )
+
+
 @router.post(
     "/end_user/block",
     tags=["Customer Management"],
@@ -389,6 +403,7 @@ async def new_end_user(
             data=new_end_user_obj,  # type: ignore
             include={"litellm_budget_table": True, "object_permission": True},
         )
+        await _invalidate_end_user_cache(data.user_id)
 
         return _to_customer_response(end_user_record)
     except Exception as e:
@@ -635,6 +650,7 @@ async def update_end_user(
             if response is None:
                 raise ValueError(f"Failed updating customer data. User ID does not exist passed user_id={data.user_id}")
             verbose_proxy_logger.debug(f"received response from updating prisma client. response={response}")
+            await _invalidate_end_user_cache(data.user_id)
 
             return _to_customer_response(response)
         else:
@@ -710,6 +726,8 @@ async def delete_end_user(
             response = await EndUserRepository(prisma_client).table.delete_many(
                 where={"user_id": {"in": data.user_ids}}
             )
+            for user_id in data.user_ids:
+                await _invalidate_end_user_cache(user_id)
             verbose_proxy_logger.debug(f"received response from updating prisma client. response={response}")
             return DeleteCustomersResponse(
                 deleted_customers=response,

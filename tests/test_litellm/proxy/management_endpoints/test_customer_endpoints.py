@@ -1,5 +1,5 @@
 from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request, status
@@ -750,6 +750,23 @@ def test_char_new_body(mock_prisma_client, mock_user_api_key_auth):
     assert response.json() == _EXPECTED_CUSTOMER
 
 
+def test_new_customer_invalidates_cached_end_user(mock_prisma_client, mock_user_api_key_auth):
+    mock_prisma_client.db.litellm_endusertable.create = AsyncMock(return_value=_row(_FULL_DB_ROW))
+
+    with patch(
+        "litellm.proxy.proxy_server.user_api_key_cache.async_delete_cache",
+        new_callable=AsyncMock,
+    ) as mock_delete_cache:
+        response = client.post(
+            "/customer/new",
+            json={"user_id": "c1"},
+            headers={"Authorization": "Bearer k"},
+        )
+
+    assert response.status_code == 200
+    mock_delete_cache.assert_awaited_once_with(key="end_user_id:c1")
+
+
 def test_char_update_body(mock_prisma_client, mock_user_api_key_auth):
     mock_prisma_client.db.litellm_endusertable.find_first = AsyncMock(
         return_value=_row({"user_id": "c1", "blocked": False})
@@ -762,6 +779,26 @@ def test_char_update_body(mock_prisma_client, mock_user_api_key_auth):
     )
     assert response.status_code == 200
     assert response.json() == _EXPECTED_CUSTOMER
+
+
+def test_update_customer_invalidates_cached_end_user(mock_prisma_client, mock_user_api_key_auth):
+    mock_prisma_client.db.litellm_endusertable.find_first = AsyncMock(
+        return_value=_row({"user_id": "c1", "blocked": False})
+    )
+    mock_prisma_client.db.litellm_endusertable.update = AsyncMock(return_value=_row(_FULL_DB_ROW))
+
+    with patch(
+        "litellm.proxy.proxy_server.user_api_key_cache.async_delete_cache",
+        new_callable=AsyncMock,
+    ) as mock_delete_cache:
+        response = client.post(
+            "/customer/update",
+            json={"user_id": "c1", "alias": "Acme"},
+            headers={"Authorization": "Bearer k"},
+        )
+
+    assert response.status_code == 200
+    mock_delete_cache.assert_awaited_once_with(key="end_user_id:c1")
 
 
 def test_char_delete_body(mock_prisma_client, mock_user_api_key_auth):
@@ -782,3 +819,28 @@ def test_char_delete_body(mock_prisma_client, mock_user_api_key_auth):
         "deleted_customers": 2,
         "message": "Successfully deleted customers with ids: ['c1', 'c2']",
     }
+
+
+def test_delete_customer_invalidates_cached_end_users(mock_prisma_client, mock_user_api_key_auth):
+    mock_prisma_client.db.litellm_endusertable.find_many = AsyncMock(
+        return_value=[
+            LiteLLM_EndUserTable(user_id="c1", blocked=False),
+            LiteLLM_EndUserTable(user_id="c2", blocked=False),
+        ]
+    )
+    mock_prisma_client.db.litellm_endusertable.delete_many = AsyncMock(return_value=2)
+
+    with patch(
+        "litellm.proxy.proxy_server.user_api_key_cache.async_delete_cache",
+        new_callable=AsyncMock,
+    ) as mock_delete_cache:
+        response = client.post(
+            "/customer/delete",
+            json={"user_ids": ["c1", "c2"]},
+            headers={"Authorization": "Bearer k"},
+        )
+
+    assert response.status_code == 200
+    mock_delete_cache.assert_has_awaits(
+        [call(key="end_user_id:c1"), call(key="end_user_id:c2")]
+    )
