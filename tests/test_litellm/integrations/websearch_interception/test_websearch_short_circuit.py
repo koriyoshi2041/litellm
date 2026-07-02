@@ -61,6 +61,41 @@ class TestTryShortCircuitSearch:
         mock_search.assert_called_once_with("Search for Claude Code releases")
 
     @pytest.mark.asyncio
+    async def test_prefers_native_tool_input_query_over_last_user_message(self):
+        """Native tool-call input.query is the actual search query."""
+        logger = WebSearchInterceptionLogger(enabled_providers=["github_copilot"])
+
+        with patch.object(
+            logger, "_execute_search", new_callable=AsyncMock
+        ) as mock_search:
+            mock_search.return_value = ("tool query results", None)
+
+            result = await logger.try_short_circuit_search(
+                model="github_copilot/claude-sonnet-4",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Use whatever search terms you think are best.",
+                    }
+                ],
+                tools=[
+                    {
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "input": {"query": "LiteLLM github copilot websearch"},
+                    }
+                ],
+                custom_llm_provider="github_copilot",
+            )
+
+        assert result is not None
+        server_tool_use = next(
+            b for b in result["content"] if b["type"] == "server_tool_use"
+        )
+        assert server_tool_use["input"] == {"query": "LiteLLM github copilot websearch"}
+        mock_search.assert_called_once_with("LiteLLM github copilot websearch")
+
+    @pytest.mark.asyncio
     async def test_does_not_short_circuit_mixed_tools(self):
         """Mix of web_search and other tools → NOT short-circuited"""
         logger = WebSearchInterceptionLogger(enabled_providers=["github_copilot"])

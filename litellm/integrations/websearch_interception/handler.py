@@ -149,12 +149,23 @@ class WebSearchInterceptionLogger(CustomLogger):
         if not all(is_web_search_tool(t) for t in tools):
             return None
 
-        # Extract search query from the last user message
-        from litellm.litellm_core_utils.prompt_templates.common_utils import (
-            get_last_user_message,
+        native_tool = next(
+            (t for t in tools if is_anthropic_native_web_search_tool(t)),
+            None,
         )
 
-        query = get_last_user_message(cast(List[AllMessageValues], messages))
+        query = None
+        if native_tool is not None:
+            tool_input = native_tool.get("input")
+            if isinstance(tool_input, dict):
+                query = tool_input.get("query")
+
+        if not query:
+            from litellm.litellm_core_utils.prompt_templates.common_utils import (
+                get_last_user_message,
+            )
+
+            query = get_last_user_message(cast(List[AllMessageValues], messages))
         if not query:
             return None
 
@@ -168,11 +179,6 @@ class WebSearchInterceptionLogger(CustomLogger):
         # web_search_tool_result content blocks so the citations panel can
         # render. The agentic-loop post-hook never fires on this path because
         # there is no model call — emit the native blocks here instead.
-        native_tool = next(
-            (t for t in tools if is_anthropic_native_web_search_tool(t)),
-            None,
-        )
-
         # Execute search — keep the structured SearchResponse so the native
         # block can carry per-result url/title/page_age.
         try:
