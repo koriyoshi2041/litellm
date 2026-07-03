@@ -5,7 +5,8 @@ Validates that:
 1. _convert_mcp_hook_response_to_kwargs extracts extra_headers from hook response
 2. pre_call_tool_check returns hook-provided extra_headers AND modified arguments
 3. call_tool flows hook headers and modified arguments downstream
-4. Hook-provided headers take highest priority (merge after static_headers)
+4. Hook-provided headers merge after static_headers except Authorization, which
+   preserves existing upstream credentials
 5. OpenAPI-backed servers log a warning and continue (skip injection) when hook headers are present
 6. JWT claims are propagated in both standard and virtual-key fast paths
 7. Backward compatibility: hooks without extra_headers continue to work
@@ -517,7 +518,7 @@ class TestCallToolFlowsHookHeaders:
 
 
 class TestHookHeaderMergePriority:
-    """Tests that hook-provided headers have highest priority in _call_regular_mcp_tool."""
+    """Tests hook-provided header precedence in _call_regular_mcp_tool."""
 
     def _make_server(
         self,
@@ -536,14 +537,17 @@ class TestHookHeaderMergePriority:
         )
 
     @pytest.mark.asyncio
-    async def test_hook_headers_override_static_headers(self):
-        """Hook headers should take precedence over static_headers."""
+    async def test_hook_headers_do_not_override_static_authorization(self):
+        """Hook headers should not replace static Authorization credentials."""
         manager = MCPServerManager()
         server = self._make_server(
             static_headers={"Authorization": "Bearer static-token", "X-Static": "yes"}
         )
 
-        hook_headers = {"Authorization": "Bearer hook-signed-jwt"}
+        hook_headers = {
+            "Authorization": "Bearer hook-signed-jwt",
+            "X-Trace-Id": "trace-123",
+        }
 
         captured_extra_headers: Dict[str, Any] = {}
 
@@ -576,8 +580,9 @@ class TestHookHeaderMergePriority:
                     pass
 
         headers = captured_extra_headers.get("value", {})
-        assert headers["Authorization"] == "Bearer hook-signed-jwt"
+        assert headers["Authorization"] == "Bearer static-token"
         assert headers["X-Static"] == "yes"
+        assert headers["X-Trace-Id"] == "trace-123"
 
     @pytest.mark.asyncio
     async def test_no_hook_headers_preserves_existing_behavior(self):
@@ -619,8 +624,8 @@ class TestHookHeaderMergePriority:
         assert headers == {"X-Static": "static-value"}
 
     @pytest.mark.asyncio
-    async def test_hook_headers_merge_with_oauth2(self):
-        """Hook headers merge on top of OAuth2 headers."""
+    async def test_hook_headers_do_not_override_oauth2_authorization(self):
+        """Hook headers should not replace a user's OAuth Authorization header."""
         manager = MCPServerManager()
         server = MCPServer(
             server_id="test-id",
@@ -629,6 +634,7 @@ class TestHookHeaderMergePriority:
             url="https://example.com",
             transport=MCPTransport.http,
             auth_type=MCPAuth.oauth2,
+            authorization_url="https://auth.example.com/oauth/authorize",
         )
 
         captured_extra_headers: Dict[str, Any] = {}
@@ -668,8 +674,7 @@ class TestHookHeaderMergePriority:
                     pass
 
         headers = captured_extra_headers.get("value", {})
-        assert headers["Authorization"] == "Bearer hook-jwt"
-        assert headers["X-OAuth"] == "yes"
+        assert "Authorization" not in headers
         assert headers["X-Trace-Id"] == "trace-123"
 
     @pytest.mark.asyncio

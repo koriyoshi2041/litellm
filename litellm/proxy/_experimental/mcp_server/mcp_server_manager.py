@@ -3260,13 +3260,18 @@ class MCPServerManager:
         if hook_extra_headers:
             if extra_headers is None:
                 extra_headers = {}
-            if "Authorization" in hook_extra_headers:
-                if "Authorization" in extra_headers:
+            hook_headers_to_merge = hook_extra_headers
+            hook_has_authorization = any(key.lower() == "authorization" for key in hook_extra_headers)
+            if hook_has_authorization:
+                has_existing_authorization = any(key.lower() == "authorization" for key in extra_headers)
+                uses_resolved_authorization = to_server_spec(mcp_server) is not None
+                if has_existing_authorization or uses_resolved_authorization:
                     verbose_logger.warning(
-                        "MCPServerManager: hook_extra_headers 'Authorization' will overwrite "
-                        "the existing Authorization header from static_headers. "
-                        "The hook JWT will take precedence."
+                        "MCPServerManager: hook_extra_headers 'Authorization' was ignored "
+                        "because an Authorization header is already configured for server '%s'.",
+                        mcp_server.server_name or mcp_server.name,
                     )
+                    hook_headers_to_merge = _without_authorization(hook_extra_headers) or {}
                 elif server_auth_header is not None:
                     # server_auth_header is passed separately to _create_mcp_client as
                     # auth_value.  Both will reach the upstream server — warn so admins
@@ -3280,7 +3285,7 @@ class MCPServerManager:
                         "the hook JWT to be the sole credential.",
                         mcp_server.server_name or mcp_server.name,
                     )
-            extra_headers.update(hook_extra_headers)
+            extra_headers.update(hook_headers_to_merge)
 
         # Reset to None if no headers were actually added
         if extra_headers is not None and len(extra_headers) == 0:
