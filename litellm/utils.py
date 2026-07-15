@@ -1512,7 +1512,6 @@ def client(original_function):
                         retry_policy=kwargs.get("retry_policy"),
                     )
                     kwargs["retry_policy"] = reset_retry_policy()  # prevent infinite loops
-                litellm.num_retries = None  # set retries to None to prevent infinite loops
                 context_window_fallback_dict = kwargs.get("context_window_fallback_dict", {})
 
                 _is_litellm_router_call = "model_group" in (
@@ -1527,7 +1526,12 @@ def client(original_function):
                         or isinstance(e, openai.APIConnectionError)
                     ):
                         kwargs["num_retries"] = num_retries
-                        return litellm.completion_with_retries(*args, **kwargs)
+                        previous_num_retries = litellm.num_retries
+                        try:
+                            litellm.num_retries = None  # set retries to None to prevent infinite loops
+                            return litellm.completion_with_retries(*args, **kwargs)
+                        finally:
+                            litellm.num_retries = previous_num_retries
                 elif (
                     isinstance(e, litellm.exceptions.ContextWindowExceededError)
                     and context_window_fallback_dict
@@ -1551,8 +1555,6 @@ def client(original_function):
                         retry_policy=kwargs.get("retry_policy"),
                     )
                     kwargs["retry_policy"] = reset_retry_policy()  # prevent infinite loops
-                litellm.num_retries = None  # set retries to None to prevent infinite loops
-
                 _is_litellm_router_call = "model_group" in (
                     kwargs.get("metadata") or {}
                 )  # check if call from litellm.router/proxy
@@ -1565,7 +1567,12 @@ def client(original_function):
                         or isinstance(e, openai.APIConnectionError)
                     ):
                         kwargs["num_retries"] = num_retries
-                        return litellm.responses_with_retries(*args, **kwargs)
+                        previous_num_retries = litellm.num_retries
+                        try:
+                            litellm.num_retries = None  # set retries to None to prevent infinite loops
+                            return litellm.responses_with_retries(*args, **kwargs)
+                        finally:
+                            litellm.num_retries = previous_num_retries
             traceback_exception = traceback.format_exc()
             end_time = datetime.datetime.now()
 
@@ -1822,14 +1829,18 @@ def client(original_function):
                     num_retries and not _is_litellm_router_call
                 ):  # only enter this if call is not from litellm router/proxy. router has it's own logic for retrying
                     try:
-                        litellm.num_retries = None  # set retries to None to prevent infinite loops
                         kwargs["num_retries"] = num_retries
                         kwargs["original_function"] = original_function
                         if isinstance(e, openai.RateLimitError):  # rate limiting specific error
                             kwargs["retry_strategy"] = "exponential_backoff_retry"
                         elif isinstance(e, openai.APIError):  # generic api error
                             kwargs["retry_strategy"] = "constant_retry"
-                        return await litellm.acompletion_with_retries(*args, **kwargs)
+                        previous_num_retries = litellm.num_retries
+                        try:
+                            litellm.num_retries = None  # set retries to None to prevent infinite loops
+                            return await litellm.acompletion_with_retries(*args, **kwargs)
+                        finally:
+                            litellm.num_retries = previous_num_retries
                     except Exception:
                         pass
                 elif (
@@ -1852,14 +1863,18 @@ def client(original_function):
                     num_retries and not _is_litellm_router_call
                 ):  # only enter this if call is not from litellm router/proxy. router has it's own logic for retrying
                     try:
-                        litellm.num_retries = None  # set retries to None to prevent infinite loops
                         kwargs["num_retries"] = num_retries
                         kwargs["original_function"] = original_function
                         if isinstance(e, openai.RateLimitError):  # rate limiting specific error
                             kwargs["retry_strategy"] = "exponential_backoff_retry"
                         elif isinstance(e, openai.APIError):  # generic api error
                             kwargs["retry_strategy"] = "constant_retry"
-                        return await litellm.aresponses_with_retries(*args, **kwargs)
+                        previous_num_retries = litellm.num_retries
+                        try:
+                            litellm.num_retries = None  # set retries to None to prevent infinite loops
+                            return await litellm.aresponses_with_retries(*args, **kwargs)
+                        finally:
+                            litellm.num_retries = previous_num_retries
                     except Exception:
                         pass
 

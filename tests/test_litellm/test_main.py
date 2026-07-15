@@ -1719,6 +1719,73 @@ async def test_retrying() -> None:
         )
 
 
+def test_completion_retry_preserves_global_num_retries(monkeypatch) -> None:
+    monkeypatch.setattr(litellm, "num_retries", 3)
+    for proxy_env in (
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "all_proxy",
+        "https_proxy",
+        "http_proxy",
+    ):
+        monkeypatch.delenv(proxy_env, raising=False)
+    with (
+        patch.object(
+            OpenAIChatCompletion,
+            "make_sync_openai_chat_completion_request",
+            side_effect=throw_retryable_error,
+        ),
+        patch.object(
+            litellm,
+            "completion_with_retries",
+            side_effect=RuntimeError("retry failed"),
+        ) as mock_retry,
+        pytest.raises(RuntimeError, match="retry failed"),
+    ):
+        litellm.completion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+    mock_retry.assert_called_once()
+    assert litellm.num_retries == 3
+
+
+@pytest.mark.asyncio
+async def test_acompletion_retry_preserves_global_num_retries(monkeypatch) -> None:
+    monkeypatch.setattr(litellm, "num_retries", 3)
+    for proxy_env in (
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "all_proxy",
+        "https_proxy",
+        "http_proxy",
+    ):
+        monkeypatch.delenv(proxy_env, raising=False)
+    with (
+        patch.object(
+            OpenAIChatCompletion,
+            "make_openai_chat_completion_request",
+            side_effect=throw_retryable_error,
+        ),
+        patch.object(
+            litellm,
+            "acompletion_with_retries",
+            side_effect=RuntimeError("retry failed"),
+        ) as mock_retry,
+        pytest.raises(litellm.InternalServerError, match="LiteLLM Retried: 3 times"),
+    ):
+        await litellm.acompletion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+    mock_retry.assert_called_once()
+    assert litellm.num_retries == 3
+
+
 def test_anthropic_disable_url_suffix_env_var():
     """Test that LITELLM_ANTHROPIC_DISABLE_URL_SUFFIX prevents /v1/messages suffix."""
     import os
