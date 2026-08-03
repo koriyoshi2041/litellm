@@ -10195,6 +10195,11 @@ class Router:
         if messages is not None:
             return litellm.token_counter(messages=messages)
         if input is not None:
+            # A list of strings is an embeddings batch, not Responses API input.
+            # Responses list items are object-shaped and are normalized below.
+            if isinstance(input, list) and all(isinstance(item, str) for item in input):
+                return sum(litellm.token_counter(text=item) for item in input)
+
             from openai.types.responses.response_create_params import ResponseInputParam
 
             from litellm.responses.litellm_completion_transformation.transformation import (

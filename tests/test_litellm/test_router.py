@@ -2986,6 +2986,35 @@ def test_count_pre_call_check_tokens_across_api_surfaces():
         router._count_pre_call_check_tokens(messages=None, input=None)
 
 
+def test_pre_call_checks_counts_embedding_batch_tokens(monkeypatch):
+    """Embedding ``list[str]`` input is counted without Responses normalization."""
+    router = litellm.Router(
+        model_list=[
+            {
+                "model_name": "embed",
+                "litellm_params": {"model": "text-embedding-3-small"},
+            },
+        ],
+        enable_pre_call_checks=True,
+    )
+    monkeypatch.setattr(
+        router, "get_router_model_info", lambda **kwargs: {"max_input_tokens": 1}
+    )
+
+    deployments = [
+        {
+            "litellm_params": {"model": "text-embedding-3-small"},
+            "model_info": {"id": "d1"},
+        },
+    ]
+    with pytest.raises(litellm.ContextWindowExceededError):
+        router._pre_call_checks(
+            model="embed",
+            healthy_deployments=deployments,
+            input=["first document", "second document"],
+        )
+
+
 def test_pre_call_checks_no_messages_or_input_does_not_crash(monkeypatch):
     """
     When neither messages nor input is provided (e.g. endpoints without prompt text),
